@@ -10,17 +10,20 @@ namespace Configs {
 // --- Equality ---
 bool ProfileFilterKey::operator==(const ProfileFilterKey &other) const noexcept
 {
-  bool this_key_nullptr = key == nullptr;
-  bool other_key_nullptr = other.key == nullptr;
-  if (this_key_nullptr){
-    return other_key_nullptr;
+  const bool this_null = key == nullptr;
+  const bool other_null = other.key == nullptr;
+  if (this_null || other_null) {
+    return this_null == other_null;
   }
-    return this_key_nullptr == other_key_nullptr
-        && key->type == other.key->type
-        && key->serverAddress == other.key->serverAddress
-        && key->serverPort == other.key->serverPort
-        && this->skip_compare_beans == other.skip_compare_beans
-        && (this->skip_compare_beans || key->compare(other.key.get(), {"c_cfg", "c_out"}) == 0);
+  if (key->type != other.key->type ||
+      key->serverAddress != other.key->serverAddress ||
+      key->serverPort != other.key->serverPort ||
+      key->name != other.key->name ||
+      skip_compare_beans != other.skip_compare_beans) {
+    return false;
+  }
+  // Avoid JsonStore::compare() — unsafe for ordering/equality containers.
+  return true;
 }
 
 bool ProfileFilterKey::operator!=(const ProfileFilterKey &other) const noexcept
@@ -49,9 +52,11 @@ bool ProfileFilterKey::operator<(const ProfileFilterKey &other) const noexcept
   if (key->serverPort != other.key->serverPort) {
     return key->serverPort < other.key->serverPort;
   }
-  // Intentionally do NOT call ProxyEntity/JsonStore::compare() here.
-  // That comparator is not a reliable strict weak order and makes QMap
-  // spin forever while processing subscription updates.
+  // Distinguish TLS vs port-hopping (and similar) profiles that share host:port
+  // but have different names / hop settings. Do NOT call JsonStore::compare().
+  if (key->name != other.key->name) {
+    return key->name < other.key->name;
+  }
   return false;
 }
 
