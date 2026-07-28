@@ -1029,6 +1029,9 @@ void RawUpdater::updateSingBox(const QJsonObject &json, const QString &name) {
         continue;
       }
       bean = ent->unlock(ent->bean());
+      if (bean == nullptr) {
+        continue;
+      }
       auto ok = bean->TryParseJson(out);
       if (!ok) {
         continue;
@@ -1261,6 +1264,30 @@ void GroupUpdater::Update(
     content = resp.data;
     sub_user_info =
         NetworkRequestHelper::GetHeader(resp.header, "Subscription-UserInfo");
+
+    // Some panels (e.g. owyx) return a full sing-box JSON for nekobox UA.
+    // Parsing that path has been hanging in ProfileFilter/QMap; prefer the
+    // share-link body the same URL returns for v2rayN-style clients.
+    {
+      const auto trimmed = content.trimmed();
+      if (trimmed.startsWith('{') &&
+          (trimmed.contains("\"outbounds\"") || trimmed.contains("\"endpoints\""))) {
+        auto linkHeaders = headers;
+        linkHeaders.insert("User-Agent", "v2rayN/6.45");
+        auto linkResp = NetworkRequestHelper::HttpGet(
+            originalUrl, false, linkHeaders, array);
+        if (linkResp.error.isEmpty()) {
+          const auto linkBody = linkResp.data.trimmed();
+          if (!linkBody.isEmpty() && !linkBody.startsWith('{') &&
+              !linkBody.startsWith("proxies:") &&
+              linkBody.contains("://")) {
+            content = linkResp.data;
+            MW_show_log("<<<<<<<< " +
+                        QObject::tr("Using share-link subscription format"));
+          }
+        }
+      }
+    }
 
     if (group != nullptr) {
       if ( group->name.isEmpty() && _auto_name){

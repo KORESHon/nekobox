@@ -49,16 +49,9 @@ bool ProfileFilterKey::operator<(const ProfileFilterKey &other) const noexcept
   if (key->serverPort != other.key->serverPort) {
     return key->serverPort < other.key->serverPort;
   }
-  if (skip_compare_beans != other.skip_compare_beans) {
-    return skip_compare_beans && !other.skip_compare_beans;
-  }
-  if (!skip_compare_beans && !other.skip_compare_beans) {
-    const auto cmp =
-        key->compare(other.key.get(), {"c_cfg", "c_out"});
-    if (cmp != 0) {
-      return cmp < 0;
-    }
-  }
+  // Intentionally do NOT call ProxyEntity/JsonStore::compare() here.
+  // That comparator is not a reliable strict weak order and makes QMap
+  // spin forever while processing subscription updates.
   return false;
 }
 
