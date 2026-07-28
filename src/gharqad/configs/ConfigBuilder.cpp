@@ -94,8 +94,6 @@ static void NormalizeFullConfigDnsForRuntime(QJsonObject &config,
       remoteDnsAddress == "localhost") {
     remoteDnsAddress = "tls://8.8.8.8";
   }
-  const auto detour =
-      dnsDetourTag.isEmpty() ? QStringLiteral("proxy") : dnsDetourTag;
   for (auto serverRef : servers) {
     if (!serverRef.isObject()) {
       cleanServers.append(serverRef);
@@ -107,7 +105,7 @@ static void NormalizeFullConfigDnsForRuntime(QJsonObject &config,
       tag = "dns-" + QString::number(cleanServers.size());
     }
     server.remove("address_resolver");
-    const auto type = server["type"].toString();
+  const auto type = server["type"].toString();
     const auto address = server["address"].toString();
     if (type == "fakeip" || address == "fakeip") {
       server["tag"] = tag;
@@ -118,7 +116,11 @@ static void NormalizeFullConfigDnsForRuntime(QJsonObject &config,
     } else {
       server = BuildDnsObject(remoteDnsAddress, true);
       server["tag"] = tag;
-      server["detour"] = detour;
+      // Empty detour tag = resolve without an outbound detour (Direct default).
+      // Never set detour to "direct" — sing-box rejects that.
+      if (!dnsDetourTag.isEmpty() && dnsDetourTag != "direct") {
+        server["detour"] = dnsDetourTag;
+      }
       if (!IsIpAddress(server["server"].toString())) {
         server["domain_resolver"] = "dns-local";
       }
@@ -194,15 +196,15 @@ static QString ApplyNekoboxDefaultOutboundToFullConfig(QJsonObject &config) {
       ensureOutbound("direct", "direct");
       finalTag = "direct";
     }
-    dnsDetour = finalTag;
+    // No DNS detour — sing-box rejects detour:"direct"
+    dnsDetour = {};
   } else if (routeChain->defaultOutboundID == blockID) {
     finalTag = findTagByType("block");
     if (finalTag.isEmpty()) {
       ensureOutbound("block", "block");
       finalTag = "block";
     }
-    dnsDetour = findTagByType("direct");
-    if (dnsDetour.isEmpty()) dnsDetour = "direct";
+    dnsDetour = {};
   } else {
     finalTag = route["final"].toString();
     if (finalTag.isEmpty()) {
@@ -1619,10 +1621,11 @@ skip_multiple_jobs:
         BuildDnsObject(dataStore->routing->remote_dns, dataStore->spmode_vpn);
     remoteDnsObj["tag"] = "dns-remote";
     remoteDnsObj["domain_resolver"] = "dns-local";
-    // Honor Default outbound: when final is Direct, don't force DNS via proxy
-    remoteDnsObj["detour"] =
-        (routeChain->defaultOutboundID == directID) ? QString("direct")
-                                                    : tagProxy;
+    // When Default outbound is Direct, omit detour entirely. sing-box rejects
+    // `detour: "direct"` with "detour to an empty direct outbound makes no sense".
+    if (routeChain->defaultOutboundID != directID) {
+      remoteDnsObj["detour"] = tagProxy;
+    }
     dnsServers += remoteDnsObj;
   }
 
