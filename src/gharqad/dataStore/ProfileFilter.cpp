@@ -31,19 +31,35 @@ bool ProfileFilterKey::operator!=(const ProfileFilterKey &other) const noexcept
 // --- Ordering (STRICT WEAK ORDERING) ---
 bool ProfileFilterKey::operator<(const ProfileFilterKey &other) const noexcept
 {
-  bool this_key_nullptr = key == nullptr;
-  bool other_key_nullptr = other.key == nullptr;
-  if (other_key_nullptr){
+  const bool this_null = key == nullptr;
+  const bool other_null = other.key == nullptr;
+  if (this_null != other_null) {
+    return this_null; // nullptr sorts before non-null
+  }
+  if (this_null) {
     return false;
   }
-    return (this_key_nullptr)
-        || key->type < other.key->type
-        || key->serverAddress < other.key->serverAddress
-        || key->serverPort < other.key->serverPort
-        || ( this->skip_compare_beans && !other.skip_compare_beans )
-        || (     (!other.skip_compare_beans) 
-              && (!this->skip_compare_beans) 
-              && key->compare(other.key.get(), {"c_cfg", "c_out"}) < 0 );
+
+  if (key->type != other.key->type) {
+    return key->type < other.key->type;
+  }
+  if (key->serverAddress != other.key->serverAddress) {
+    return key->serverAddress < other.key->serverAddress;
+  }
+  if (key->serverPort != other.key->serverPort) {
+    return key->serverPort < other.key->serverPort;
+  }
+  if (skip_compare_beans != other.skip_compare_beans) {
+    return skip_compare_beans && !other.skip_compare_beans;
+  }
+  if (!skip_compare_beans && !other.skip_compare_beans) {
+    const auto cmp =
+        key->compare(other.key.get(), {"c_cfg", "c_out"});
+    if (cmp != 0) {
+      return cmp < 0;
+    }
+  }
+  return false;
 }
 
 bool ProfileFilterKey::operator>(const ProfileFilterKey &other) const noexcept

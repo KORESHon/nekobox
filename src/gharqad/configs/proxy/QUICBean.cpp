@@ -241,6 +241,17 @@ bool QUICBean::TryParseJson(const Configs::Data::Node &obj) {
     return false;
   }
   add_default_fields(this->entity, obj);
+  // Prefer a hop port when server_port is missing (common in hopping configs)
+  if (entity->serverPort <= 0 && !serverPorts.isEmpty()) {
+    auto first = serverPorts.first();
+    first.replace(':', '-');
+    const auto parts = first.split('-', Qt::SkipEmptyParts);
+    if (!parts.isEmpty()) {
+      bool ok = false;
+      const int port = parts.first().toInt(&ok);
+      if (ok && port > 0) entity->serverPort = port;
+    }
+  }
   auto &obj_tls = obj["tls"];
   alpn = obj_tls["alpn"].isArray() ? obj_tls["alpn"].toStringList().join(",")
                                      : obj_tls["alpn"].toString();
