@@ -83,7 +83,8 @@ static void ResolveOutboundServerForTestConfig(QJsonObject &outbound) {
   }
 }
 
-static void NormalizeFullConfigDnsForRuntime(QJsonObject &config) {
+static void NormalizeFullConfigDnsForRuntime(QJsonObject &config,
+                                             const QString &dnsDetourTag) {
   auto dns = config["dns"].toObject();
   auto servers = dns["servers"].toArray();
   QJsonArray cleanServers;
@@ -93,6 +94,8 @@ static void NormalizeFullConfigDnsForRuntime(QJsonObject &config) {
       remoteDnsAddress == "localhost") {
     remoteDnsAddress = "tls://8.8.8.8";
   }
+  const auto detour =
+      dnsDetourTag.isEmpty() ? QStringLiteral("proxy") : dnsDetourTag;
   for (auto serverRef : servers) {
     if (!serverRef.isObject()) {
       cleanServers.append(serverRef);
@@ -115,7 +118,7 @@ static void NormalizeFullConfigDnsForRuntime(QJsonObject &config) {
     } else {
       server = BuildDnsObject(remoteDnsAddress, true);
       server["tag"] = tag;
-      server["detour"] = "proxy";
+      server["detour"] = detour;
       if (!IsIpAddress(server["server"].toString())) {
         server["domain_resolver"] = "dns-local";
       }
@@ -148,6 +151,76 @@ static void NormalizeFullConfigDnsForRuntime(QJsonObject &config) {
     dns["servers"] = cleanServers;
     config["dns"] = dns;
   }
+}
+
+// Apply NekoBox "Default outbound" onto full JSON profiles that otherwise
+// keep their embedded route.final (usually the subscription selector/proxy).
+static QString ApplyNekoboxDefaultOutboundToFullConfig(QJsonObject &config) {
+  auto routeChain =
+      profileManager->GetRouteChain(dataStore->routing->current_route_id);
+  if (routeChain == nullptr) {
+    return QStringLiteral("proxy");
+  }
+
+  auto route = config["route"].toObject();
+  auto outbounds = config["outbounds"].toArray();
+
+  auto findTagByType = [&](const QString &type) -> QString {
+    for (const auto &ref : outbounds) {
+      const auto out = ref.toObject();
+      if (out["type"].toString() == type) {
+        auto tag = out["tag"].toString();
+        if (!tag.isEmpty()) return tag;
+      }
+    }
+    return {};
+  };
+
+  auto ensureOutbound = [&](const QString &type, const QString &tag) {
+    if (!findTagByType(type).isEmpty()) return;
+    QJsonObject out;
+    out["type"] = type;
+    out["tag"] = tag;
+    outbounds.append(out);
+    config["outbounds"] = outbounds;
+  };
+
+  QString finalTag;
+  QString dnsDetour = QStringLiteral("proxy");
+
+  if (routeChain->defaultOutboundID == directID) {
+    finalTag = findTagByType("direct");
+    if (finalTag.isEmpty()) {
+      ensureOutbound("direct", "direct");
+      finalTag = "direct";
+    }
+    dnsDetour = finalTag;
+  } else if (routeChain->defaultOutboundID == blockID) {
+    finalTag = findTagByType("block");
+    if (finalTag.isEmpty()) {
+      ensureOutbound("block", "block");
+      finalTag = "block";
+    }
+    dnsDetour = findTagByType("direct");
+    if (dnsDetour.isEmpty()) dnsDetour = "direct";
+  } else {
+    finalTag = route["final"].toString();
+    if (finalTag.isEmpty()) {
+      for (const auto &ref : outbounds) {
+        const auto out = ref.toObject();
+        const auto type = out["type"].toString();
+        if (type == "direct" || type == "block" || type == "dns") continue;
+        finalTag = out["tag"].toString();
+        if (!finalTag.isEmpty()) break;
+      }
+    }
+    if (finalTag.isEmpty()) finalTag = "proxy";
+    dnsDetour = finalTag;
+  }
+
+  route["final"] = finalTag;
+  config["route"] = route;
+  return dnsDetour;
 }
 
 static void NormalizeFullConfigOutboundForRuntime(QJsonObject &outbound) {
@@ -434,7 +507,8 @@ BuildConfig(const std::shared_ptr<ProxyEntity> &ent, bool forTest,
     auto customBean = ent->CustomBean();
     if (customBean != nullptr && customBean->core == "internal-full") {
       result->coreConfig = QString2QJsonObject(customBean->config_simple);
-      NormalizeFullConfigDnsForRuntime(result->coreConfig);
+      auto dnsDetour = ApplyNekoboxDefaultOutboundToFullConfig(result->coreConfig);
+      NormalizeFullConfigDnsForRuntime(result->coreConfig, dnsDetour);
       ResolveFullConfigOutboundServersForRuntime(result->coreConfig);
       if (!status->forTest) {
         QJsonArray clientInbounds;
@@ -1545,7 +1619,10 @@ skip_multiple_jobs:
         BuildDnsObject(dataStore->routing->remote_dns, dataStore->spmode_vpn);
     remoteDnsObj["tag"] = "dns-remote";
     remoteDnsObj["domain_resolver"] = "dns-local";
-    remoteDnsObj["detour"] = tagProxy;
+    // Honor Default outbound: when final is Direct, don't force DNS via proxy
+    remoteDnsObj["detour"] =
+        (routeChain->defaultOutboundID == directID) ? QString("direct")
+                                                    : tagProxy;
     dnsServers += remoteDnsObj;
   }
 

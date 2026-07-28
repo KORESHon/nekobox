@@ -814,11 +814,12 @@ ret_loop:
             stack << json["proxy"].toString();
           } else if (json.contains("outbounds") || json.contains("endpoints")) {
             auto remarks = json["remarks"].toString();
-            if (json.contains("inbounds") || json.contains("routing") ||
-                json.contains("route") || json.contains("dns")) {
+            // Prefer individual proxy nodes so NekoBox routing works.
+            // Fall back to full JSON only when no leaf outbounds can be parsed.
+            auto before = proxies.size();
+            updateSingBox(json, remarks);
+            if (proxies.size() == before) {
               addFullJsonProxy(json, remarks);
-            } else {
-              updateSingBox(json, remarks);
             }
           }
         } else if (i.isString()) {
@@ -839,13 +840,13 @@ ret_loop:
     json_contains_endpoints = json.contains("endpoints");
     json_contains_outbounds = json.contains("outbounds");
     json_contains_inbounds = json.contains("inbounds");
-    // SingBox
+    // SingBox — expand leaf outbounds first; full JSON only as fallback
     if ((json_contains_outbounds || json_contains_endpoints)) {
-      if (json_contains_inbounds || json.contains("routing") ||
-          json.contains("route") || json.contains("dns")) {
-        addFullJsonProxy(json, json["remarks"].toString());
-      } else {
-        updateSingBox(json);
+      auto remarks = json["remarks"].toString();
+      auto before = proxies.size();
+      updateSingBox(json, remarks);
+      if (proxies.size() == before) {
+        addFullJsonProxy(json, remarks);
       }
       goto ret_loop;
     }
